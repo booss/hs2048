@@ -37,11 +37,14 @@ update (i, j) v = snd . mapAccumL go1 0
     where go1  n    x = (n+1, snd $ mapAccumL go2 (n, 0) x)
           go2 (n,m) x = ((n, m+1), if n == i && m == j then v else x)
 
+occurrence :: [Int]
+occurrence = 4 : replicate 9 2
+
 addRandom :: Board -> IO Board
-addRandom b = let e = holes b in do
-    p <- fmap (e!!) $ randomRIO (0, length e - 1)
-    v <- randomRIO (0.0, 1.0) :: IO Float
-    return $ update p (if v < 0.9 then 2 else 4) b
+addRandom b = let emptycells = holes b in do
+    p <- fmap (emptycells!!) $ randomRIO (0, length emptycells - 1)
+    v <- fmap (occurrence!!) $ randomRIO (0, 9)
+    return $ update p v b
 
 display :: Board -> IO ()
 display = mapM_ $ putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")
