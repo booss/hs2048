@@ -14,17 +14,26 @@ emptyBoard = replicate 4 . replicate 4 $ 0
 fill :: [Int] -> [Int]
 fill xs = take 4 $ xs ++ repeat 0
 
-merge :: [Int] -> [Int]
-merge (x:y:xs) | x == y    = 2*x : merge xs
-               | otherwise =   x : merge (y : xs)
-merge      xs  = xs
+merge :: [Int] -> (Int, [Int])
+merge (x:y:xs) | x == y    = let s = 2*x
+                                 (s', xs') = merge xs
+                             in (s + s', s : xs')
+               | otherwise = let (s, xs') = merge (y : xs)
+                             in (s, x : xs')
+merge      xs  = (0, xs)
 
-move :: Direction -> Board -> Board
-move West    = map $ fill . merge . filter (/=0)
-move South   = transpose . move East . transpose
-move North   = transpose . move West . transpose
-move East    = map $ reverse . fill . merge . reverse . filter (/=0)
-move Invalid = \b -> b
+move :: Direction -> Board -> (Int, Board)
+move West board = mapAccumL go 0 board
+    where go n row = let (n', r') = merge . filter (/=0) $ row
+                     in (n + n', fill r')
+move South board = let (s, b) = move East (transpose board)
+                   in (s, transpose b)
+move North board = let (s, b) = move West (transpose board)
+                   in (s, transpose b)
+move East board = mapAccumL go 0 board
+    where go n row = let (n', r') = merge . reverse . filter (/=0) $ row
+                     in (n + n', reverse . fill $ r')
+move Invalid board = (0, board)
 
 direction :: Char -> Direction
 direction 'h' = West
@@ -50,9 +59,11 @@ addRandom b = let emptycells = holes b in do
     v <- fmap (occurrence!!) $ randomRIO (0, 9)
     return $ update p v b
 
-draw :: Board -> IO ()
-draw = mapM_ $ putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")
-    where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
+draw :: Int -> Board -> IO ()
+draw score board = putStrLn ("\ESC[KScore: " ++ show score)
+                >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) board
+    where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr
+                                ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
               where xstr = if x == 0 then " " else show x
                     midl = 4 - length xstr
                     (spc1, spc2) = (midl `div` 2, midl - spc1)
@@ -73,25 +84,32 @@ display :: String -> IO ()
 display s = putStr $ "\ESC[1K\ESC[1D" ++ s
 
 usage :: IO ()
-usage = putStrLn "Usage: 2048 [board]    h - move left\n\
-                 \r - restart            j - move down\n\
-                 \s - save game          k - move up\n\
-                 \x - quit               l - move right\n"
+usage = putStrLn "Usage: 2048 [board] - reload a previously saved board\n\
+                 \r - restart       h - move left\n\
+                 \s - save          j - move down\n\
+                 \u - undo          k - move up\n\
+                 \x - quit          l - move right\n"
+
+undo :: Int -> Board -> [(Int, Board)] -> ((Int, Board), [(Int, Board)])
+undo s b [] = ((s, b), [])
+undo _ _ (u:us) = (u, us)
 
 play :: IO ()
-play = getArgs >>= buildBoard >>= loop
-    where loop board = display "\ESC[u" >> draw board >>
-                if null (holes board) && ((move North . move West) board == board)
+play = getArgs >>= buildBoard >>= loop 0 []
+    where loop score undos board = display "\ESC[u" >> draw score board >>
+                if null (holes board) && (snd . move North . snd . move West $ board) == board
                 then putStrLn "Game Over !"
                 else getChar >>= \c ->
                         case c of
-                            'x' -> display ""
                             'r' -> display "\ESC[u" >> play
                             's' -> display $ show board ++ "\n"
-                            _   -> let board' = move (direction c) board
+                            'u' -> let ((s, b), us) = undo score board undos
+                                   in loop s us b
+                            'x' -> display "Bye !\n"
+                            _   -> let (score', board') = move (direction c) board
                                    in if board' == board
-                                      then loop board
-                                      else addRandom board' >>= loop
+                                      then loop score undos board
+                                      else addRandom board' >>= loop (score + score') ((score, board) : undos)
 
 main :: IO ()
 main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> play
