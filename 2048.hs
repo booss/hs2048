@@ -1,5 +1,6 @@
-import Data.List     (transpose, mapAccumL, elemIndices)
-import System.Random (randomRIO)
+import Data.List          (transpose, mapAccumL, elemIndices)
+import System.Random      (randomRIO)
+import System.Environment (getArgs)
 
 type Board = [[Int]]
 data Direction = North | South | West | East | Invalid
@@ -46,28 +47,36 @@ addRandom b = let emptycells = holes b in do
     v <- fmap (occurrence!!) $ randomRIO (0, 9)
     return $ update p v b
 
-display :: Board -> IO ()
-display = mapM_ $ putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")
+draw :: Board -> IO ()
+draw = mapM_ $ putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")
     where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
               where xstr = if x == 0 then " " else show x
                     midl = 4 - length xstr
                     (spc1, spc2) = (midl `div` 2, midl - spc1)
-                    xcol = case x of 2    -> "\ESC[36;1m" ; 64   -> "\ESC[36m"
-                                     4    -> "\ESC[34;1m" ; 128  -> "\ESC[34m"
-                                     8    -> "\ESC[35;1m" ; 256  -> "\ESC[35m"
-                                     16   -> "\ESC[31;1m" ; 512  -> "\ESC[31m"
-                                     32   -> "\ESC[32;1m" ; 1024 -> "\ESC[32m"
-                                     _    -> "\ESC[38m"
+                    xcol = case x of 2    -> "\ESC[34;2m" ; 64   -> "\ESC[35;1m"
+                                     4    -> "\ESC[34;1m" ; 128  -> "\ESC[31;2m"
+                                     8    -> "\ESC[36;2m" ; 256  -> "\ESC[31;1m"
+                                     16   -> "\ESC[36;1m" ; 512  -> "\ESC[32;2m"
+                                     32   -> "\ESC[35;2m" ; 1024 -> "\ESC[32;1m"
+                                     2048 -> "\ESC[33;2m" ; _    -> "\ESC[33;1m"
+buildBoard :: [String] -> IO Board
+buildBoard (a:_) = return . map fill . read $ a
+buildBoard    _  = addRandom emptyBoard >>= addRandom
+
+display :: String -> IO ()
+display s = putStr $ "\ESC[1K\ESC[1D" ++ s
 
 main :: IO ()
-main = putStr "\ESC[s" >> addRandom emptyBoard >>= addRandom >>= play
-    where play board = putStr "\ESC[1K\ESC[1D\ESC[u" >> display board
+main = putStr "\ESC[s" >> getArgs >>= buildBoard >>= play
+    where play board = display "\ESC[u" >> draw board
             >> if null (holes board) && ((move North . move West) board == board)
                then putStrLn "Game Over !"
                else getChar >>= \c ->
-                        if c == 'x'
-                        then putStr "\ESC[1K\ESC[1D" >> return ()
-                        else let board' = move (direction c) board
-                             in if board' == board
-                                then play board
-                                else addRandom board' >>= play
+	       		case c of
+				'x' -> display ""
+				'r' -> display "\ESC[u" >> main
+				's' -> display $ show board ++ "\n"
+				_   -> let board' = move (direction c) board
+				       in if board' == board
+				  	  then play board
+				  	  else addRandom board' >>= play
