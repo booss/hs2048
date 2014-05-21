@@ -62,6 +62,7 @@ draw = mapM_ $ putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")
                                      16   -> "\ESC[36;1m" ; 512  -> "\ESC[32;2m"
                                      32   -> "\ESC[35;2m" ; 1024 -> "\ESC[32;1m"
                                      2048 -> "\ESC[33;2m" ; _    -> "\ESC[33;1m"
+
 buildBoard :: [String] -> IO Board
 buildBoard (a:_) = return . map fill . read $ a
 buildBoard    _  = addRandom emptyBoard >>= addRandom
@@ -92,3 +93,5 @@ play = getArgs >>= buildBoard >>= loop
 
 main :: IO ()
 main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> play
+
+-- vim: et sts=4 sw=4
