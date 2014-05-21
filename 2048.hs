@@ -1,6 +1,9 @@
+{-# OPTIONS_GHC -Wall -fforce-recomp -fllvm #-}
+
 import Data.List          (transpose, mapAccumL, elemIndices)
 import System.Random      (randomRIO)
 import System.Environment (getArgs)
+import System.IO          (hSetBuffering, BufferMode(NoBuffering), stdin)
 
 type Board = [[Int]]
 data Direction = North | South | West | East | Invalid
@@ -66,17 +69,26 @@ buildBoard    _  = addRandom emptyBoard >>= addRandom
 display :: String -> IO ()
 display s = putStr $ "\ESC[1K\ESC[1D" ++ s
 
+usage :: IO ()
+usage = putStrLn "Usage: 2048 [board]    h - move left\n\
+                 \r - restart            j - move down\n\
+                 \s - save game          k - move up\n\
+                 \x - quit               l - move right\n"
+
+play :: IO ()
+play = getArgs >>= buildBoard >>= loop
+    where loop board = display "\ESC[u" >> draw board >>
+                if null (holes board) && ((move North . move West) board == board)
+                then putStrLn "Game Over !"
+                else getChar >>= \c ->
+                        case c of
+                            'x' -> display ""
+                            'r' -> display "\ESC[u" >> play
+                            's' -> display $ show board ++ "\n"
+                            _   -> let board' = move (direction c) board
+                                   in if board' == board
+                                      then loop board
+                                      else addRandom board' >>= loop
+
 main :: IO ()
-main = putStr "\ESC[s" >> getArgs >>= buildBoard >>= play
-    where play board = display "\ESC[u" >> draw board
-            >> if null (holes board) && ((move North . move West) board == board)
-               then putStrLn "Game Over !"
-               else getChar >>= \c ->
-	       		case c of
-				'x' -> display ""
-				'r' -> display "\ESC[u" >> main
-				's' -> display $ show board ++ "\n"
-				_   -> let board' = move (direction c) board
-				       in if board' == board
-				  	  then play board
-				  	  else addRandom board' >>= play
+main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> play
