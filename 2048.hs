@@ -8,6 +8,12 @@ import System.IO          (hSetBuffering, BufferMode(NoBuffering), stdin)
 type Board = [[Int]]
 data Direction = North | South | West | East | Invalid
 
+data GameState = GameState
+           { gBoard :: Board
+           , gScore :: Int
+           , gUndo  :: [(Int, Board)]
+           }
+
 emptyBoard :: Board
 emptyBoard = replicate 4 . replicate 4 $ 0
 
@@ -59,9 +65,9 @@ addRandom b = let emptycells = holes b in do
     v <- fmap (occurrence!!) $ randomRIO (0, 9)
     return $ update p v b
 
-draw :: Int -> Board -> IO ()
-draw score board = putStrLn ("\ESC[KScore: " ++ show score)
-                >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) board
+draw :: GameState -> IO ()
+draw gs = putStrLn ("\ESC[KScore: " ++ show (gScore gs))
+            >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) (gBoard gs)
     where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr
                                 ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
               where xstr = if x == 0 then " " else show x
@@ -85,31 +91,45 @@ display s = putStr $ "\ESC[1K\ESC[1D" ++ s
 
 usage :: IO ()
 usage = putStrLn "Usage: 2048 [board] - reload a previously saved board\n\
+                 \n - new\n\
                  \r - restart       h - move left\n\
                  \s - save          j - move down\n\
                  \u - undo          k - move up\n\
                  \x - quit          l - move right\n"
 
-undo :: Int -> Board -> [(Int, Board)] -> ((Int, Board), [(Int, Board)])
-undo s b [] = ((s, b), [])
-undo _ _ (u:us) = (u, us)
+undo :: GameState -> GameState
+undo g@GameState { gUndo = [] }          = g
+undo g@GameState { gUndo = ((s, b):us) } = g { gBoard = b, gScore = s, gUndo = us }
+
+reset :: GameState -> GameState
+reset g@GameState { gUndo = [] } = g
+reset g@GameState { gUndo =  u } = g { gBoard = snd . last $ u, gScore = 0, gUndo = [] }
+
+step :: GameState -> Int -> Board -> GameState
+step g@GameState { gBoard = b, gScore = s, gUndo = u } points board =
+        g { gBoard = board, gScore = s + points, gUndo = (s,b):u }
+
+new :: Board -> GameState
+new board = GameState { gBoard = board, gScore = 0, gUndo = [] }
+
+loop :: GameState -> IO ()
+loop game = let board = gBoard game in display "\ESC[u" >> draw game >>
+        if null (holes board) && (snd . move North . snd . move West $ board) == board
+        then putStrLn "Game Over !"
+        else getChar >>= \c ->
+                case c of
+                    'n' -> display "\ESC[u" >> buildBoard [] >>= loop . new
+                    'r' -> display "\ESC[u" >> loop (reset game)
+                    's' -> display $ show board ++ "\n"
+                    'u' -> loop (undo game)
+                    'x' -> display "Bye !\n"
+                    _   -> let (points, board') = move (direction c) board
+                           in if board' == board
+                              then loop game
+                              else addRandom board' >>= loop . (step game points)
 
 play :: IO ()
-play = getArgs >>= buildBoard >>= loop 0 []
-    where loop score undos board = display "\ESC[u" >> draw score board >>
-                if null (holes board) && (snd . move North . snd . move West $ board) == board
-                then putStrLn "Game Over !"
-                else getChar >>= \c ->
-                        case c of
-                            'r' -> display "\ESC[u" >> play
-                            's' -> display $ show board ++ "\n"
-                            'u' -> let ((s, b), us) = undo score board undos
-                                   in loop s us b
-                            'x' -> display "Bye !\n"
-                            _   -> let (score', board') = move (direction c) board
-                                   in if board' == board
-                                      then loop score undos board
-                                      else addRandom board' >>= loop (score + score') ((score, board) : undos)
+play = getArgs >>= buildBoard >>= loop . new
 
 main :: IO ()
 main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> play
