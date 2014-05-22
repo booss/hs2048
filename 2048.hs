@@ -14,7 +14,7 @@ step  :: State -> GameState -> GameState
 step  (n,b) (GS (sb@(s, _), u)) = GS ((s + n,b), sb : u)
 
 undo  :: GameState -> GameState
-undo g@(GS (_,[])) = g
+undo g@(GS (_,  [])) = g
 undo   (GS (_,u:us)) = GS (u,us)
 
 reset :: GameState -> GameState
@@ -75,10 +75,10 @@ updateRand b = let emptycells = holes b in do
     v <- fmap (occurrence!!) $ randomRIO (0, 9)
     return $ update p v b
 
-draw :: State -> IO ()
-draw (score, board) = putStrLn ("\ESC[KScore: " ++ show score)
-            >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) board
-    where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr
+draw :: Int -> Board -> IO ()
+draw score board = putStrLn ("\ESC[u\ESC[0JScore: " ++ show score) >>
+        mapM_ (putStrLn . (foldl draw2 "\ESC[37;1m| \ESC[0m")) board
+    where draw2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr
                                 ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
               where xstr = if x == 0 then " " else show x
                     midl = 4 - length xstr
@@ -96,9 +96,6 @@ prepare (a:_) = case reads a of
                     _ -> updateRand empty >>= updateRand
 prepare    _  = updateRand empty >>= updateRand
 
-display :: String -> IO ()
-display s = putStr $ "\ESC[1K\ESC[1D" ++ s
-
 usage :: IO ()
 usage = putStrLn "Usage: 2048 [board] - reload a previously saved board\n\
                  \n - new\n\
@@ -108,16 +105,17 @@ usage = putStrLn "Usage: 2048 [board] - reload a previously saved board\n\
                  \x - quit          l - move right\n"
 
 play :: GameState -> IO ()
-play game@(GS (info@(_,board),_)) = display "\ESC[u" >> draw info >>
+play game@(GS ((score,board),_)) = draw score board >>
         if null (holes board) && (snd . move North . snd . move West $ board) == board
-        then putStrLn "Game Over !"
-        else getChar >>= \c ->
+        then putStr "Game Over, what next ? " >> input
+        else input
+    where input = getChar >>= \c -> putStr "\ESC[1D" >>
                 case c of
-                    'n' -> display "\ESC[u" >> prepare [] >>= play . new
-                    'r' -> display "\ESC[u" >> play (reset game)
-                    's' -> display $ show board ++ "\n"
-                    'u' -> play (undo game)
-                    'x' -> display "Bye !\n"
+                    'n' -> prepare [] >>= play . new
+                    'r' -> play $ reset game
+                    's' -> putStrLn $ show board
+                    'u' -> play $ undo game
+                    'x' -> putStrLn "Bye !"
                     _   -> let (points, board') = move (direction c) board
                            in if board' == board
                               then play game
