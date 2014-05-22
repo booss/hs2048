@@ -6,47 +6,26 @@ import System.Environment (getArgs)
 import System.IO          (hSetBuffering, BufferMode(NoBuffering), stdin)
 
 type Board = [[Int]]
+type State = (Int, Board)
 data Direction = North | South | West | East | Invalid
+newtype GameState = GS (State, [State])
 
-data GameState = GameState
-           { gBoard :: Board
-           , gScore :: Int
-           , gUndo  :: [(Int, Board)]
-           }
+step  :: State -> GameState -> GameState
+step  (n,b) (GS (sb@(s, _), u)) = GS ((s + n,b), sb : u)
 
-emptyBoard :: Board
-emptyBoard = replicate 4 . replicate 4 $ 0
+undo  :: GameState -> GameState
+undo g@(GS (_,[])) = g
+undo   (GS (_,u:us)) = GS (u,us)
 
-fill :: [Int] -> [Int]
-fill xs = take 4 $ xs ++ repeat 0
+reset :: GameState -> GameState
+reset g@(GS (_,[])) = g
+reset   (GS (_,us)) = GS (last us, [])
 
-merge :: [Int] -> (Int, [Int])
-merge (x:y:xs) | x == y    = let s = 2*x
-                                 (s', xs') = merge xs
-                             in (s + s', s : xs')
-               | otherwise = let (s, xs') = merge (y : xs)
-                             in (s, x : xs')
-merge      xs  = (0, xs)
+new :: Board -> GameState
+new b = GS ((0, b), [])
 
-move :: Direction -> Board -> (Int, Board)
-move West board = mapAccumL go 0 board
-    where go n row = let (n', r') = merge . filter (/=0) $ row
-                     in (n + n', fill r')
-move South board = let (s, b) = move East (transpose board)
-                   in (s, transpose b)
-move North board = let (s, b) = move West (transpose board)
-                   in (s, transpose b)
-move East board = mapAccumL go 0 board
-    where go n row = let (n', r') = merge . reverse . filter (/=0) $ row
-                     in (n + n', reverse . fill $ r')
-move Invalid board = (0, board)
-
-direction :: Char -> Direction
-direction 'h' = West
-direction 'j' = South
-direction 'k' = North
-direction 'l' = East
-direction  _  = Invalid
+empty :: Board
+empty = replicate 4 . replicate 4 $ 0
 
 holes :: Board -> [(Int, Int)]
 holes = concat . zipWith (zip . repeat) [0..] . map (elemIndices 0)
@@ -56,18 +35,49 @@ update (i, j) v = snd . mapAccumL go1 0
     where go1  n    x = (n+1, snd $ mapAccumL go2 (n, 0) x)
           go2 (n,m) x = ((n, m+1), if n == i && m == j then v else x)
 
+fill :: [Int] -> [Int]
+fill xs = take 4 $ xs ++ repeat 0
+
+merge :: [Int] -> (Int, [Int])
+merge (x:y:xs) | x == y    = (s + sx, s : xs')
+               | otherwise = (sy, x : ys')
+                    where s         = 2*x
+                          (sx, xs') = merge xs
+                          (sy, ys') = merge (y:xs)
+merge      xs  = (0, xs)
+
+move :: Direction -> Board -> (Int, Board)
+move West board = mapAccumL go 0 board
+    where go n row = (n + n', fill row')
+                where (n', row') = merge . filter (/=0) $ row
+move South board = (n, transpose b)
+    where (n, b) = move East . transpose $ board
+move North board = (n, transpose b)
+    where (n, b) = move West . transpose $ board
+move East board = mapAccumL go 0 board
+    where go n row = (n + n', reverse . fill $ row')
+                where (n', row') = merge . reverse . filter (/=0) $ row
+move Invalid board = (0, board)
+
+direction :: Char -> Direction
+direction 'h' = West
+direction 'j' = South
+direction 'k' = North
+direction 'l' = East
+direction  _  = Invalid
+
 occurrence :: [Int]
 occurrence = 4 : replicate 9 2
 
-addRandom :: Board -> IO Board
-addRandom b = let emptycells = holes b in do
+updateRand :: Board -> IO Board
+updateRand b = let emptycells = holes b in do
     p <- fmap (emptycells!!) $ randomRIO (0, length emptycells - 1)
     v <- fmap (occurrence!!) $ randomRIO (0, 9)
     return $ update p v b
 
-draw :: GameState -> IO ()
-draw gs = putStrLn ("\ESC[KScore: " ++ show (gScore gs))
-            >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) (gBoard gs)
+draw :: State -> IO ()
+draw (score, board) = putStrLn ("\ESC[KScore: " ++ show score)
+            >> mapM_ (putStrLn . (foldl disp2 "\ESC[37;1m| \ESC[0m")) board
     where disp2 s x = s ++ xcol ++ replicate spc1 ' ' ++ xstr
                                 ++ replicate spc2 ' ' ++ "\ESC[0m\ESC[37;1m | \ESC[0m"
               where xstr = if x == 0 then " " else show x
@@ -80,11 +90,11 @@ draw gs = putStrLn ("\ESC[KScore: " ++ show (gScore gs))
                                      32   -> "\ESC[35;2m" ; 1024 -> "\ESC[32;1m"
                                      2048 -> "\ESC[33;2m" ; _    -> "\ESC[33;1m"
 
-buildBoard :: [String] -> IO Board
-buildBoard (a:_) = case reads a of
+prepare :: [String] -> IO Board
+prepare (a:_) = case reads a of
                     [(b, _)] -> return . map fill $ b
-                    _ -> addRandom emptyBoard >>= addRandom
-buildBoard    _  = addRandom emptyBoard >>= addRandom
+                    _ -> updateRand empty >>= updateRand
+prepare    _  = updateRand empty >>= updateRand
 
 display :: String -> IO ()
 display s = putStr $ "\ESC[1K\ESC[1D" ++ s
@@ -97,41 +107,23 @@ usage = putStrLn "Usage: 2048 [board] - reload a previously saved board\n\
                  \u - undo          k - move up\n\
                  \x - quit          l - move right\n"
 
-undo :: GameState -> GameState
-undo g@GameState { gUndo = [] }          = g
-undo g@GameState { gUndo = ((s, b):us) } = g { gBoard = b, gScore = s, gUndo = us }
-
-reset :: GameState -> GameState
-reset g@GameState { gUndo = [] } = g
-reset g@GameState { gUndo =  u } = g { gBoard = snd . last $ u, gScore = 0, gUndo = [] }
-
-step :: GameState -> Int -> Board -> GameState
-step g@GameState { gBoard = b, gScore = s, gUndo = u } points board =
-        g { gBoard = board, gScore = s + points, gUndo = (s,b):u }
-
-new :: Board -> GameState
-new board = GameState { gBoard = board, gScore = 0, gUndo = [] }
-
-loop :: GameState -> IO ()
-loop game = let board = gBoard game in display "\ESC[u" >> draw game >>
+play :: GameState -> IO ()
+play game@(GS (info@(_,board),_)) = display "\ESC[u" >> draw info >>
         if null (holes board) && (snd . move North . snd . move West $ board) == board
         then putStrLn "Game Over !"
         else getChar >>= \c ->
                 case c of
-                    'n' -> display "\ESC[u" >> buildBoard [] >>= loop . new
-                    'r' -> display "\ESC[u" >> loop (reset game)
+                    'n' -> display "\ESC[u" >> prepare [] >>= play . new
+                    'r' -> display "\ESC[u" >> play (reset game)
                     's' -> display $ show board ++ "\n"
-                    'u' -> loop (undo game)
+                    'u' -> play (undo game)
                     'x' -> display "Bye !\n"
                     _   -> let (points, board') = move (direction c) board
                            in if board' == board
-                              then loop game
-                              else addRandom board' >>= loop . (step game points)
-
-play :: IO ()
-play = getArgs >>= buildBoard >>= loop . new
+                              then play game
+                              else updateRand board' >>= \board'' -> play $ step (points, board'') game
 
 main :: IO ()
-main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> play
+main = hSetBuffering stdin NoBuffering >> usage >> putStr "\ESC[s" >> getArgs >>= prepare >>= play . new
 
 -- vim: et sts=4 sw=4
