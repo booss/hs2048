@@ -109,13 +109,12 @@ play game@(GS ((score,board),_)) = draw score board >>
         if null (holes board) && (snd . move North . snd . move West $ board) == board
         then putStr "Game Over, what next ? " >> input
         else input
-    where input = getChar >>= \c -> putStr "\ESC[1D" >>
-                case c of
+    where input = getChar >>= \c -> case c of
                     'n' -> prepare [] >>= play . new
                     'r' -> play $ reset game
                     's' -> putStrLn $ show board
                     'u' -> play $ undo game
-                    'x' -> putStrLn "Bye !"
+                    'x' -> putStrLn "\ESC[1DBye !"
                     _   -> let (points, board') = move (direction c) board
                            in if board' == board
                               then play game
