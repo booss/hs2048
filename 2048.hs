@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wall -fforce-recomp -fllvm #-}
+{-# OPTIONS_GHC -Wall -fforce-recomp #-}
 
 import Data.List          (transpose, mapAccumL, elemIndices)
 import System.Random      (randomRIO)
@@ -92,8 +92,8 @@ draw score board = putStrLn ("\ESC[u\ESC[0JScore: " ++ show score) >>
 
 prepare :: [String] -> IO Board
 prepare (a:_) = case reads a of
-                    [(b, _)] -> return . map fill $ b
-                    _ -> updateRand empty >>= updateRand
+                    [(b, _)] -> return $ map fill b
+                    _        -> updateRand empty >>= updateRand
 prepare    _  = updateRand empty >>= updateRand
 
 usage :: IO ()
