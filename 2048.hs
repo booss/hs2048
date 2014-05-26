@@ -4,16 +4,17 @@ import Data.List          (transpose, mapAccumL, elemIndices)
 import System.Random      (randomRIO)
 import System.Environment (getArgs)
 import System.IO          (hSetBuffering, BufferMode(NoBuffering), stdin)
+import Control.Arrow      (second, (***))
 
 type Board = [[Int]]
 type State = (Int, Board)
 data Direction = North | South | West | East | Invalid
 newtype GameState = GS (State, [State])
 
-step  :: State -> GameState -> GameState
-step  (n,b) (GS (sb@(s, _), u)) = GS ((s + n,b), sb : u)
+step :: State -> GameState -> GameState
+step (n,b) (GS (sb@(s, _), u)) = GS ((s + n,b), sb : u)
 
-undo  :: GameState -> GameState
+undo :: GameState -> GameState
 undo g@(GS (_,  [])) = g
 undo   (GS (_,u:us)) = GS (u,us)
 
@@ -36,7 +37,7 @@ update (i, j) v = snd . mapAccumL go1 0
           go2 (n,m) x = ((n, m+1), if n == i && m == j then v else x)
 
 fill :: [Int] -> [Int]
-fill xs = take 4 $ xs ++ repeat 0
+fill = take 4 . (++ repeat 0)
 
 merge :: [Int] -> (Int, [Int])
 merge (x:y:xs) | x == y    = (s + sx, s : xs')
@@ -47,17 +48,11 @@ merge (x:y:xs) | x == y    = (s + sx, s : xs')
 merge      xs  = (0, xs)
 
 move :: Direction -> Board -> (Int, Board)
-move West board = mapAccumL go 0 board
-    where go n row = (n + n', fill row')
-                where (n', row') = merge . filter (/=0) $ row
-move South board = (n, transpose b)
-    where (n, b) = move East . transpose $ board
-move North board = (n, transpose b)
-    where (n, b) = move West . transpose $ board
-move East board = mapAccumL go 0 board
-    where go n row = (n + n', reverse . fill $ row')
-                where (n', row') = merge . reverse . filter (/=0) $ row
-move Invalid board = (0, board)
+move West    = mapAccumL (\n -> ((+n) *** fill) . merge . filter (/=0)) 0
+move South   = second transpose . move East . transpose
+move North   = second transpose . move West . transpose
+move East    = mapAccumL (\n -> ((+n) *** reverse . fill) . merge . reverse . filter (/=0)) 0
+move Invalid = \board -> (0, board)
 
 direction :: Char -> Direction
 direction 'h' = West
